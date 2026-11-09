@@ -24,6 +24,10 @@ class Terminal {
 		this.inputResolve = null;
 		this.EOF = -1;
 
+		// Input boundary tracking
+		this.inputStartX = 0;
+		this.inputStartY = 0;
+
 		// Buffer configuration
 		this.maxBufferLines = 1024;
 		this.cols = Math.floor(w / (this.font.width * this.fontSize));
@@ -178,10 +182,33 @@ class Terminal {
 					this.processChar(32);
 				}
 				break;
-			case 8: 
-				if (this.cursorX > 0) {
-					this.cursorX--;
-					currentLine[this.cursorX] = { code: 32, bg: this.textBackground, fg: this.textColor };
+			case 8: // Backspace
+				// Only allow backspace if we are past the start of the input prompt
+				if (this.cursorY > this.inputStartY || (this.cursorY === this.inputStartY && this.cursorX > this.inputStartX)) {
+					if (this.cursorX > 0) {
+						this.cursorX--;
+						while (currentLine.length <= this.cursorX) {
+							currentLine.push({ code: 32, bg: this.textBackground, fg: this.textColor });
+						}
+						currentLine[this.cursorX] = {
+							code: 32,
+							bg: this.textBackground,
+							fg: this.textColor
+						};
+					} else if (this.cursorY > this.inputStartY) {
+						// Jump up to the previous line if wrapped
+						this.cursorY--;
+						this.cols = Math.floor(this.canvas.width / (this.font.width * this.fontSize));
+						this.cursorX = this.cols - 1;
+						currentLine = this.lines[this.cursorY];
+						if (currentLine && currentLine.length > this.cursorX) {
+							currentLine[this.cursorX] = {
+								code: 32,
+								bg: this.textBackground,
+								fg: this.textColor
+							};
+						}
+					}
 				}
 				break;
 			default:
@@ -313,7 +340,6 @@ class Terminal {
 	}
 
 	render() {
-		// Clear canvas
 		Graphics.fillRect(this.ctx, 0, 0, this.canvas.width, this.canvas.height, this.backgroundColor);
 
 		let startLineIndex = this.scrollOffset;
@@ -351,11 +377,7 @@ class Terminal {
 
 	async getchar() {
 		let code = await this.getch();
-		if (code !== 8) {
-			this.putchar(code);
-		} else {
-			this.putchar(code);
-		}
+		this.putchar(code);
 		return code;
 	}
 
@@ -364,6 +386,9 @@ class Terminal {
 			let ch = text.charCodeAt(i);
 			this.putchar(ch);		
 		}
+		// Save input start boundary right after the prompt
+		this.inputStartX = this.cursorX;
+		this.inputStartY = this.cursorY;
 	}
 
 	cls() {
