@@ -28,6 +28,16 @@ class Terminal {
 		this.inputStartX = 0;
 		this.inputStartY = 0;
 
+		// Cursor blink state
+		this.cursorVisible = true;
+		setInterval(() => {
+			this.cursorVisible = !this.cursorVisible;
+			let maxOffset = Math.max(0, this.lines.length - this.rows);
+			if (this.scrollOffset === maxOffset || this.scrollOffset === Math.max(0, this.cursorY - this.rows + 1)) {
+				this.render();
+			}
+		}, 500); // Blink every 500ms
+
 		// Buffer configuration
 		this.maxBufferLines = 1024;
 		this.cols = Math.floor(w / (this.font.width * this.fontSize));
@@ -152,9 +162,14 @@ class Terminal {
 			}
 		}	
 
-		// Auto-scroll view to follow cursor during output
+		// Ensure viewport scrolls down to keep cursor visible when wrapping or outputting
 		let maxOffset = Math.max(0, this.lines.length - this.rows);
-		this.scrollOffset = maxOffset;
+		if (this.cursorY >= this.scrollOffset + this.rows) {
+			this.scrollOffset = this.cursorY - this.rows + 1;
+		}
+		if (this.scrollOffset > maxOffset) {
+			this.scrollOffset = maxOffset;
+		}
 
 		this.render();
 	}
@@ -171,6 +186,9 @@ class Terminal {
 				break;
 			case 10: 
 				this.cursorY++;
+				while (this.lines.length <= this.cursorY) {
+					this.lines.push([]);
+				}
 				this.cursorX = 0;
 				if (this.lines.length > this.maxBufferLines) {
 					this.lines.shift();
@@ -183,7 +201,6 @@ class Terminal {
 				}
 				break;
 			case 8: // Backspace
-				// Only allow backspace if we are past the start of the input prompt
 				if (this.cursorY > this.inputStartY || (this.cursorY === this.inputStartY && this.cursorX > this.inputStartX)) {
 					if (this.cursorX > 0) {
 						this.cursorX--;
@@ -196,7 +213,6 @@ class Terminal {
 							fg: this.textColor
 						};
 					} else if (this.cursorY > this.inputStartY) {
-						// Jump up to the previous line if wrapped
 						this.cursorY--;
 						this.cols = Math.floor(this.canvas.width / (this.font.width * this.fontSize));
 						this.cursorX = this.cols - 1;
@@ -225,6 +241,9 @@ class Terminal {
 				if (this.cursorX >= this.cols) {
 					this.cursorX = 0;
 					this.cursorY++;
+					while (this.lines.length <= this.cursorY) {
+						this.lines.push([]);
+					}
 					if (this.lines.length > this.maxBufferLines) {
 						this.lines.shift();
 						this.cursorY = Math.max(0, this.cursorY - 1);
@@ -343,18 +362,38 @@ class Terminal {
 		Graphics.fillRect(this.ctx, 0, 0, this.canvas.width, this.canvas.height, this.backgroundColor);
 
 		let startLineIndex = this.scrollOffset;
-		let endLineIndex = Math.min(this.lines.length, startLineIndex + this.rows);
+		let maxLine = Math.max(this.lines.length, this.cursorY + 1);
+		let endLineIndex = Math.min(maxLine, startLineIndex + this.rows);
+		
 		let charWidth = this.font.width * this.fontSize;
 		let lineHeight = this.font.height * this.fontSize;
 
 		for (let r = startLineIndex; r < endLineIndex; r++) {
-			let line = this.lines[r];
+			let line = this.lines[r] || [];
 			let drawY = (r - startLineIndex) * lineHeight;
 
 			for (let c = 0; c < line.length; c++) {
 				let charObj = line[c];
 				let drawX = c * charWidth;
 				Graphics.drawChar(this.ctx, this.font, charObj.code, drawX, drawY, this.fontSize, charObj.bg, charObj.fg);
+			}
+		}
+
+		// Render blinking block cursor if visible and within viewport rows
+		if (this.cursorVisible) {
+			let cursorRowScreen = this.cursorY - startLineIndex;
+			if (cursorRowScreen >= 0 && cursorRowScreen < this.rows) {
+				let drawX = this.cursorX * charWidth;
+				let drawY = cursorRowScreen * lineHeight;
+
+				let line = this.lines[this.cursorY];
+				let charObj = (line && line[this.cursorX]) ? line[this.cursorX] : { code: 32, bg: this.textBackground, fg: this.textColor };
+
+				// Draw filled background block using active text color
+				Graphics.fillRect(this.ctx, drawX, drawY, charWidth, lineHeight, this.textColor);
+
+				// Draw character on top with inverted colors
+				Graphics.drawChar(this.ctx, this.font, charObj.code, drawX, drawY, this.fontSize, this.textColor, this.backgroundColor);
 			}
 		}
 	}
@@ -386,7 +425,6 @@ class Terminal {
 			let ch = text.charCodeAt(i);
 			this.putchar(ch);		
 		}
-		// Save input start boundary right after the prompt
 		this.inputStartX = this.cursorX;
 		this.inputStartY = this.cursorY;
 	}
